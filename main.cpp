@@ -10,12 +10,12 @@
 #define INSTRUCTION 0x00
 #define DATA 0x02
 
-#define MODE_4_BIT 0x10
+#define SET_MODE 0x28  // 4-bit mode and 2-line display
 #define CLEAR_DISPLAY 0x01
 #define RETURN_HOME 0x02
 #define SET_ENTRY_MODE_INCREMENT 0x06
-#define JUMP_FIRST_LINE 0x20
-#define JUMP_SECOND_LINE 0x30 // guessing
+#define JUMP_FIRST_LINE 0x80
+#define JUMP_SECOND_LINE 0xC0 // guessing
 
 DigitalOut MOSI(D11);
 DigitalOut SCK(D13);
@@ -44,13 +44,22 @@ int main()
     lcd_initialize();
     char random_number;
     std::string lcd_string;
+    bool line = 0;
     while (true) {
         random_number = std::rand() % 0xFF;
-        lcd_string = "Random #: " + std::to_string(random_number);
-        // lcd_string.insert(0, " ", 2);
-        lcd_write_string(lcd_string);
+        lcd_string = "Random #: " + std::to_string(random_number);  // Create string
+        lcd_string += std::string(16-lcd_string.size(), ' ');   // Pad with spaces
+        if (line==0){
+            lcd_clear();
+            lcd_write_string(lcd_string);
+        }
+        else{
+            // lcd_write_instruction(JUMP_SECOND_LINE);
+            lcd_write_string(lcd_string);
+        }
         ThisThread::sleep_for(250ms);
-        lcd_clear();
+        line = !line;
+        // lcd_write_instruction(RETURN_HOME);
     }
 }
 
@@ -78,6 +87,7 @@ void send_byte(const char& data){
     wait_us(5);
     SCK = false;
     wait_us(5);
+    wait_us(50000);
 }
 
 
@@ -110,8 +120,8 @@ void lcd_write_instruction(const char data){
     lcd_write(data, INSTRUCTION);
 }
 
-void set_4bit_mode(){
-    lcd_write_instruction(MODE_4_BIT);
+void set_mode(){
+    lcd_write_instruction(SET_MODE);
     wait_us(5);
 }
 
@@ -122,7 +132,8 @@ void lcd_clear(){
 }
 
 void lcd_initialize(){
-        set_4bit_mode();
+    set_mode();
+    wait_us(5);
     lcd_clear();
     wait_us(2000);
     lcd_write_instruction(SET_ENTRY_MODE_INCREMENT);
