@@ -5,6 +5,7 @@
 #include "mbed_debug.h"
 #include "mstd_utility"
 #include "rtos.h"
+#include <cstdlib>
 #include <stdlib.h>
 #include <string>
 
@@ -13,9 +14,15 @@
 
 #define MODE_8_BIT 0x33
 #define MODE_4_BIT 0x22
-#define CLEAR_DISPLAY 0x01
+#define MODE_2_LINES 0x28
 
-#define SPEED 64
+#define DISPLAY_ON 0x0C
+#define DISPLAY_OFF 0x08
+
+#define CLEAR_DISPLAY 0x01
+#define RETURN_HOME 0x02
+#define JUMP_SECOND 0xC0
+#define JUMP_FIRST 0x80
 
 DigitalOut MOSI(D11);
 DigitalOut SCK(D13);
@@ -36,6 +43,7 @@ void lcd_initialize();
 void lcd_write_string(const std::string& lcd_string);
 
 void debug_beep();
+void instruction_soup(); // Sends 100 random instructions to unstuck the LCD display
 
 // main() runs in its own thread in the OS
 int main()
@@ -53,7 +61,8 @@ int main()
         lcd_write_string(lcd_string);
 
         ThisThread::sleep_for(250ms);
-        lcd_clear();
+        // lcd_clear();
+        lcd_write_instruction(CLEAR_DISPLAY);
     }
 }
 
@@ -64,7 +73,7 @@ void send_bit(bool bit){
     SCK = true;
     wait_us(1);
     SCK = false;
-    wait_us(2);
+    wait_us(1);
 }
 
 void send_byte(const char& data){
@@ -74,7 +83,7 @@ void send_byte(const char& data){
         bit = data & bit_mask;
         send_bit(bit);
         bit_mask = bit_mask >> 1;
-        wait_us(2);
+        wait_us(1);
     }
     SCK = true;
     wait_us(1);
@@ -121,9 +130,9 @@ void lcd_write_instruction(const char data){
 
 
 void set_mode(){
-    lcd_write_instruction(0x00);
     lcd_write_instruction(MODE_8_BIT);
     lcd_write_instruction(MODE_4_BIT);
+    lcd_write_instruction(MODE_2_LINES);
 }
 
 void lcd_clear(){
@@ -131,8 +140,11 @@ void lcd_clear(){
 }
 
 void lcd_initialize(){
+    lcd_write_instruction(0x00);
     set_mode();
     lcd_clear();
+    lcd_write_instruction(DISPLAY_ON); // + turn off cursor visibility
+    // instruction_soup();
 }
 
 void lcd_write_string(const std::string& lcd_string){
@@ -148,3 +160,11 @@ void debug_beep(){
     ThisThread::sleep_for(50ms);
 }
 
+void instruction_soup(){
+    char instr;
+    for (int i=0; i<100; i++){
+        instr = std::rand() % 0xFF;
+        lcd_write_instruction(instr);
+        printf("%d\n",instr);
+    }
+}
