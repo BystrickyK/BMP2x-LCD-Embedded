@@ -15,6 +15,8 @@
 #define MODE_4_BIT 0x22
 #define CLEAR_DISPLAY 0x01
 
+#define SPEED 64
+
 DigitalOut MOSI(D11);
 DigitalOut SCK(D13);
 DigitalOut EN(D10);
@@ -46,7 +48,7 @@ int main()
     while (true) {
 
         random_number = std::rand() % 0xFF;
-        lcd_string = "Random #: " + std::to_string(random_number);  // Create string
+        lcd_string = "Random #:" + std::to_string(random_number);  // Create string
         lcd_string += std::string(16 - lcd_string.size(), ' ');   // Pad with spaces
         lcd_write_string(lcd_string);
 
@@ -77,20 +79,19 @@ void send_byte(const char& data){
     SCK = true;
     wait_us(1);
     SCK = false;
-
-    wait_us(100000);
+    wait_us(1);
 }
 
 void lcd_write_8_bit(const char& data){
     send_byte(data);
     EN = true;
-    debug_beep();
+    // debug_beep();
     wait_us(1);
-    wait_us(250000);
+    // wait_us(250000/SPEED);
     EN = false;
-    debug_beep();
+    // debug_beep();
     wait_us(1);
-    wait_us(250000);
+    // wait_us(250000/SPEED);
 
 }
 
@@ -101,9 +102,9 @@ void lcd_write(const char& data, char mode){
     // Send last 4 bits
     data_out = (data << 4) | mode;
     lcd_write_8_bit(data_out);
-        debug_beep();
-        debug_beep();
-        debug_beep();
+        // debug_beep();
+        // debug_beep();
+        // debug_beep();
 }
 
 
@@ -123,19 +124,15 @@ void set_mode(){
     lcd_write_instruction(0x00);
     lcd_write_instruction(MODE_8_BIT);
     lcd_write_instruction(MODE_4_BIT);
-
-    wait_us(3000);
 }
 
 void lcd_clear(){
     lcd_write_instruction(CLEAR_DISPLAY);
-    wait_us(3000);
 }
 
 void lcd_initialize(){
     set_mode();
     lcd_clear();
-    wait_us(2000);
 }
 
 void lcd_write_string(const std::string& lcd_string){
@@ -148,6 +145,6 @@ void debug_beep(){
     DEBUG = true;
     ThisThread::sleep_for(2ms);
     DEBUG = false;
-    ThisThread::sleep_for(100ms);
+    ThisThread::sleep_for(50ms);
 }
 
