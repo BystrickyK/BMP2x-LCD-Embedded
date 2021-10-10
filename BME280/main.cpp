@@ -44,6 +44,8 @@ int main()
     bool calibration_successful = false;
     bool sensor_mode_set = false;
 
+    
+
     while (true) {      
 
         if (!address_found){  
@@ -79,8 +81,10 @@ int main()
         }
 
         if (calibration_successful && !sensor_mode_set){
-            data[0] = 0x27;
-            rslt = user_i2c_write(0xF4, &data[0], 1, &dev_addr);
+            data[0] = 0xF4;
+            data[1] = 0x00;
+            rslt = user_i2c_write(0xF4, &data[1], 1, &dev_addr);
+            // rslt = i2c.write(dev_addr, (const char*)&data[0], 2);
             if (rslt==0){
                 sensor_mode_set=true;
                 printf("Sensor activated...");
@@ -94,7 +98,7 @@ int main()
             uncomp_data.pressure, uncomp_data.temperature, uncomp_data.humidity);
         }
 
-    ThisThread::sleep_for(50ms);
+    ThisThread::sleep_for(125ms);
 
     } // while(1) end
 } // Main end
@@ -117,9 +121,9 @@ int8_t user_i2c_write(uint8_t reg_addr, const uint8_t *reg_data, uint32_t len, v
 
     std::vector<uint8_t> i2c_data_package; // Create data to send through I2C
     i2c_data_package.emplace_back(reg_addr); // First byte == register address
-    i2c_data_package.insert(i2c_data_package.end(), &reg_data[0], &reg_data[len-1]);
+    i2c_data_package.insert(i2c_data_package.end(), &reg_data[0], &reg_data[len]);
 
-    rslt = int8_t(i2c_ptr->write((*(int*)intf_ptr), (const char*)&i2c_data_package[0], int(len)));
+    rslt = int8_t(i2c_ptr->write((*(int*)intf_ptr), (const char*)&i2c_data_package[0], len+1));
     return rslt;
 }
 
@@ -152,9 +156,9 @@ uint8_t read_calibration_data(bme280_calib_data* calib_data, uint8_t dev_add){
     calib_data->dig_h1 = data[0];
     calib_data->dig_h2 = from_2_bytes<int16_t>(data[1], data[2]);
     calib_data->dig_h3 = data[3];
-    calib_data->dig_h4 = static_cast<int16_t>(data[4]<<4 | data[5]);
-    calib_data->dig_h5 = static_cast<int16_t>(data[6]<<8 | data[7]);
-    calib_data->dig_h6 = static_cast<int8_t>(data[8]);
+    calib_data->dig_h4 = from_2_bytes<int16_t>(data[4]>>4, data[5]);
+    calib_data->dig_h5 = from_2_bytes<int16_t>(data[7], data[6]);
+    calib_data->dig_h6 = *reinterpret_cast<int8_t*>(&data[8]);
     return result;
     }
 
@@ -163,5 +167,6 @@ uint8_t read_calibration_data(bme280_calib_data* calib_data, uint8_t dev_add){
 template <typename T>
 T from_2_bytes(uint8_t LSB, uint8_t MSB)
 {
-    return static_cast<T>(uint16_t(MSB<<8 | LSB));
+    uint16_t tmp = MSB<<8 | LSB;
+    return *reinterpret_cast<T*>(&tmp);
 }
