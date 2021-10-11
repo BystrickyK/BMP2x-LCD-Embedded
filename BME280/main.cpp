@@ -22,7 +22,7 @@ line
 121 -> BME280 chip identifier
 122 -> // #define BME280_CHIP_ID                            UINT8_C(0x60)
 // Must've been redefined, the real ID written in the chip ID register
-// is actually 0x58
+// is actually 0x58; maybe because this chip has no humidity sensor?
 123 -> #define BME280_CHIP_ID                            UINT8_C(0x58) 
 
 */
@@ -57,12 +57,12 @@ int main()
     bool device_found = false;
     dev_addr -= 20;      
 
+    std::string temp_dec;
+
+    // Sweep across I2C device address space to find the sensor
     while (!device_found){  
         dev.intf_ptr = &dev_addr;
-        // TODO: Problem with failing chip ID check
         rslt = bme280_init(&dev);
-        // rslt = user_i2c_read(0xD0, &data[0], 1, &dev_addr);
-        // printf("%d | %x\n", data[0], data[0]);
 
         lcd_first_line();
         lcd_string = "Result: " + std::to_string(rslt) + "  ";
@@ -79,22 +79,20 @@ int main()
             lcd_first_line();
             lcd_write_string("Address found...");
             ThisThread::sleep_for(2s);
-             lcd_clear();
+            lcd_clear();
          }
-        else dev_addr++;
+        else dev_addr++; 
     }
 
     /* Recommended mode of operation: Indoor navigation */
-	dev.settings.osr_h = BME280_OVERSAMPLING_2X;
 	dev.settings.osr_p = BME280_OVERSAMPLING_4X;
-	dev.settings.osr_t = BME280_OVERSAMPLING_2X;
-	dev.settings.filter = BME280_FILTER_COEFF_2;
-	dev.settings.standby_time = BME280_STANDBY_TIME_62_5_MS;
+	dev.settings.osr_t = BME280_OVERSAMPLING_4X;
+	dev.settings.filter = BME280_FILTER_COEFF_4;
+	dev.settings.standby_time = BME280_STANDBY_TIME_125_MS;
 
     uint8_t settings_sel;
 	settings_sel = BME280_OSR_PRESS_SEL;
 	settings_sel |= BME280_OSR_TEMP_SEL;
-	settings_sel |= BME280_OSR_HUM_SEL;
 	settings_sel |= BME280_STANDBY_SEL;
 	settings_sel |= BME280_FILTER_SEL;
     rslt = bme280_set_sensor_settings(settings_sel, &dev);
@@ -119,12 +117,23 @@ int main()
 
     while (true) {
         rslt = bme280_get_sensor_data(7, &comp_data, &dev);
-        printf("%d ||| \t%d.%d Pa | %d.%d degC | %d.%d %relHum\n", rslt,
-        int(comp_data.pressure), int(comp_data.pressure*100)%100,
-        int(comp_data.temperature), int(comp_data.temperature*1000)%1000,
-        int(comp_data.humidity), int(comp_data.humidity*1000)%1000);
+        // printf("%d ||| \t%d.%02d Pa | %d.%03d degC |\n", rslt,
+        // int(comp_data.pressure), int(comp_data.pressure*100)%100,
+        // int(comp_data.temperature), int(comp_data.temperature*1000)%1000);
 
-        ThisThread::sleep_for(500ms);
+        lcd_first_line();
+        temp_dec = std::to_string(int(comp_data.temperature*100)%100);
+        if (temp_dec.size()==1) temp_dec = "0" + temp_dec;
+        lcd_string = "T: " + std::to_string(int(comp_data.temperature)) + 
+        "." + temp_dec + " degC";
+        lcd_write_string(lcd_string);
+
+        lcd_second_line();
+        lcd_string = "p: " + std::to_string(int(comp_data.pressure)) + 
+        "." + std::to_string(int(comp_data.pressure*10)%10) + " Pa";
+        lcd_write_string(lcd_string);
+
+        ThisThread::sleep_for(125ms);
     } // while(1) end
 } // Main end
 
