@@ -1,4 +1,5 @@
 #include "InterruptIn.h"
+#include "LittleFileSystem.h"
 #include "PinNameAliases.h"
 #include "ThisThread.h"
 #include "bme280_defs.h"
@@ -15,7 +16,19 @@
 #include <array>
 #include "comm.h"
 #include "BME280_driver/bme280.h"
+/* Change in bme280_defs.h
 
+line
+121 -> BME280 chip identifier
+122 -> // #define BME280_CHIP_ID                            UINT8_C(0x60)
+// Must've been redefined, the real ID written in the chip ID register
+// is actually 0x58
+123 -> #define BME280_CHIP_ID                            UINT8_C(0x58) 
+
+*/
+
+
+bme280_dev dev;  // main BME280 API object
 int8_t rslt = 1;
 uint8_t dev_addr = 0x76<<1;
 
@@ -24,82 +37,94 @@ I2C* i2c_ptr = &i2c;
 
 int8_t user_i2c_read(uint8_t reg_addr, uint8_t *reg_data, uint32_t len, void *intf_ptr);
 int8_t user_i2c_write(uint8_t reg_addr, const uint8_t *reg_data, uint32_t len, void *intf_ptr);
-
-uint8_t read_calibration_data(bme280_calib_data* calib_data, uint8_t dev_add);
-
-template <typename T>
-T from_2_bytes(uint8_t LSB, uint8_t MSB);
+void user_delay_us(uint32_t period, void *intf_ptr);
 
 // main() runs in its own thread in the OS
 int main()
 { 
+
+    dev.intf = BME280_I2C_INTF;
+    dev.read = user_i2c_read;
+    dev.write = user_i2c_write;
+    dev.delay_us = user_delay_us;
+
     ThisThread::sleep_for(500ms);
     lcd_initialize();
     std::string lcd_string;
-    std::array<uint8_t, 8> data;
-    bme280_uncomp_data uncomp_data;
-    bme280_calib_data calib_data;
 
-    bool address_found = false;
-    bool calibration_successful = false;
-    bool sensor_mode_set = false;
+    bme280_data comp_data;
 
-    
+    bool device_found = false;
+    dev_addr -= 20;      
 
-    while (true) {      
+    while (!device_found){  
+        dev.intf_ptr = &dev_addr;
+        // TODO: Problem with failing chip ID check
+        rslt = bme280_init(&dev);
+        // rslt = user_i2c_read(0xD0, &data[0], 1, &dev_addr);
+        // printf("%d | %x\n", data[0], data[0]);
 
-        if (!address_found){  
-            rslt = user_i2c_read(data[0], &data[0], 1, &dev_addr);
+        lcd_first_line();
+        lcd_string = "Result: " + std::to_string(rslt) + "  ";
+        lcd_write_string(lcd_string);
 
+        lcd_second_line();
+        lcd_string = "I2C Add: " + std::to_string(dev_addr) + "  ";
+         lcd_write_string(lcd_string);
+
+        ThisThread::sleep_for(250ms);
+
+        if (rslt == 0 ) {
+            device_found = true;
             lcd_first_line();
-            lcd_string = "Result: " + std::to_string(rslt);
-            lcd_write_string(lcd_string);
+            lcd_write_string("Address found...");
+            ThisThread::sleep_for(2s);
+             lcd_clear();
+         }
+        else dev_addr++;
+    }
 
-            lcd_second_line();
-            lcd_string = "I2C Add: " + std::to_string(dev_addr);
-            lcd_write_string(lcd_string);
+    /* Recommended mode of operation: Indoor navigation */
+	dev.settings.osr_h = BME280_OVERSAMPLING_2X;
+	dev.settings.osr_p = BME280_OVERSAMPLING_4X;
+	dev.settings.osr_t = BME280_OVERSAMPLING_2X;
+	dev.settings.filter = BME280_FILTER_COEFF_2;
+	dev.settings.standby_time = BME280_STANDBY_TIME_62_5_MS;
 
-            ThisThread::sleep_for(100ms);
-            // lcd_clear();
+    uint8_t settings_sel;
+	settings_sel = BME280_OSR_PRESS_SEL;
+	settings_sel |= BME280_OSR_TEMP_SEL;
+	settings_sel |= BME280_OSR_HUM_SEL;
+	settings_sel |= BME280_STANDBY_SEL;
+	settings_sel |= BME280_FILTER_SEL;
+    rslt = bme280_set_sensor_settings(settings_sel, &dev);
 
-            if (rslt == 0 ) {
-                address_found = true;
-                ThisThread::sleep_for(2s);
-                lcd_clear();
-                printf("Address found...");
-            }
-            else dev_addr++;
-        }
+    if (rslt==0) rslt = bme280_set_sensor_mode(BME280_NORMAL_MODE, &dev); // Set normal mode
+    if (rslt==0){
+        lcd_first_line();
+        lcd_write_string("Sensor mode:");
+        lcd_second_line();
+        lcd_write_string("Normal");
+         ThisThread::sleep_for(2s);
+         lcd_clear();
+    }
+    else{
+         lcd_first_line();
+         lcd_write_string("Sensor mode:");
+         lcd_second_line();
+         lcd_write_string("Error");
+         ThisThread::sleep_for(2s);
+          lcd_clear();
+    }
 
-        if (!calibration_successful)
-        {
-            rslt = read_calibration_data(&calib_data, dev_addr);
-            if (rslt==0){
-                calibration_successful=true;
-                printf("Calibration successful...");
-            }
-        }
+    while (true) {
+        rslt = bme280_get_sensor_data(7, &comp_data, &dev);
+        printf("%d ||| \t%d.%d Pa | %d.%d degC | %d.%d %relHum\n", rslt,
+        int(comp_data.pressure), int(comp_data.pressure*100)%100,
+        int(comp_data.temperature), int(comp_data.temperature*1000)%1000,
+        int(comp_data.humidity), int(comp_data.humidity*1000)%1000);
 
-        if (calibration_successful && !sensor_mode_set){
-            data[0] = 0xF4;
-            data[1] = 0x00;
-            rslt = user_i2c_write(0xF4, &data[1], 1, &dev_addr);
-            // rslt = i2c.write(dev_addr, (const char*)&data[0], 2);
-            if (rslt==0){
-                sensor_mode_set=true;
-                printf("Sensor activated...");
-            }
-        }
-
-        if (sensor_mode_set){
-            rslt = user_i2c_read(0xF7, &data[0], 8, &dev_addr);
-            bme280_parse_sensor_data(&data[0], &uncomp_data);
-            printf("%d \t | %d \t | %d\n", 
-            uncomp_data.pressure, uncomp_data.temperature, uncomp_data.humidity);
-        }
-
-    ThisThread::sleep_for(125ms);
-
+        ThisThread::sleep_for(500ms);
     } // while(1) end
 } // Main end
 
@@ -127,46 +152,6 @@ int8_t user_i2c_write(uint8_t reg_addr, const uint8_t *reg_data, uint32_t len, v
     return rslt;
 }
 
-uint8_t read_calibration_data(bme280_calib_data* calib_data, uint8_t dev_add){
-    // https://www.mouser.com/datasheet/2/783/BST-BME280-DS002-1509607.pdf
-
-    // read 24 bytes with the temperature/pressure calibration data
-    std::array<uint8_t, 24> data;
-    uint8_t result = 0;
-
-    uint8_t reg_add = 0x88;
-    result = user_i2c_read(reg_add, &data[0], 24, &dev_add);
-    if (result != 0) return result;
-    calib_data->dig_t1 = from_2_bytes<uint16_t>(data[0], data[1]);
-    calib_data->dig_t2 = from_2_bytes<int16_t>(data[2], data[3]);
-    calib_data->dig_t3 = from_2_bytes<int16_t>(data[4], data[5]);
-    calib_data->dig_p1 = from_2_bytes<uint16_t>(data[6], data[7]);
-    calib_data->dig_p2 = from_2_bytes<int16_t>(data[8], data[9]);
-    calib_data->dig_p3 = from_2_bytes<int16_t>(data[10], data[11]);
-    calib_data->dig_p4 = from_2_bytes<int16_t>(data[12], data[13]);
-    calib_data->dig_p5 = from_2_bytes<int16_t>(data[14], data[15]);
-    calib_data->dig_p6 = from_2_bytes<int16_t>(data[16], data[17]);
-    calib_data->dig_p7 = from_2_bytes<int16_t>(data[18], data[19]);
-    calib_data->dig_p8 = from_2_bytes<int16_t>(data[20], data[21]);
-    calib_data->dig_p9 = from_2_bytes<int16_t>(data[22], data[23]);
-
-    reg_add = 0xA1;
-    result = user_i2c_read(reg_add, &data[0], 9, &dev_add);
-    if (result != 0) return result;
-    calib_data->dig_h1 = data[0];
-    calib_data->dig_h2 = from_2_bytes<int16_t>(data[1], data[2]);
-    calib_data->dig_h3 = data[3];
-    calib_data->dig_h4 = from_2_bytes<int16_t>(data[4]>>4, data[5]);
-    calib_data->dig_h5 = from_2_bytes<int16_t>(data[7], data[6]);
-    calib_data->dig_h6 = *reinterpret_cast<int8_t*>(&data[8]);
-    return result;
-    }
-
-
-
-template <typename T>
-T from_2_bytes(uint8_t LSB, uint8_t MSB)
-{
-    uint16_t tmp = MSB<<8 | LSB;
-    return *reinterpret_cast<T*>(&tmp);
+void user_delay_us(uint32_t period, void *intf_ptr){
+    wait_us(period);
 }
