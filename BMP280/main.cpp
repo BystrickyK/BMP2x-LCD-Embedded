@@ -2,7 +2,6 @@
 #include "LittleFileSystem.h"
 #include "PinNameAliases.h"
 #include "ThisThread.h"
-#include "bme280_defs.h"
 #include "mbed.h"
 #include "mbed_debug.h"
 #include "mstd_utility"
@@ -16,16 +15,8 @@
 #include <array>
 #include "comm.h"
 #include "BMP2-Sensor-API/bmp2.h"
-/* Change in bme280_defs.h
 
-line
-121 -> BME280 chip identifier
-122 -> // #define BME280_CHIP_ID                            UINT8_C(0x60)
-// Must've been redefined, the real ID written in the chip ID register
-// is actually 0x58; maybe because this chip has no humidity sensor?
-123 -> #define BME280_CHIP_ID                            UINT8_C(0x58) 
-
-*/
+#define BMP2_64BIT_COMPENSATION
 
 
 bmp2_dev dev;  // main BMP2 API object
@@ -54,9 +45,9 @@ int main()
 
     bmp2_data comp_data;
     uint32_t meas_time;
+    uint8_t tmp;
 
-    bool device_found = false;
-    dev_addr -= 20;      
+    bool device_found = false;     
 
     std::string temp_dec;
 
@@ -71,39 +62,45 @@ int main()
 
         lcd_second_line();
         lcd_string = "I2C Add: " + std::to_string(dev_addr) + "  ";
-         lcd_write_string(lcd_string);
+        lcd_write_string(lcd_string);
 
-        ThisThread::sleep_for(250ms);
+        ThisThread::sleep_for(50ms);
 
         if (rslt == 0 ) {
+            bmp2_soft_reset(&dev);
             device_found = true;
             lcd_first_line();
             lcd_write_string("Address found...");
-            ThisThread::sleep_for(2s);
+            ThisThread::sleep_for(1s);
             lcd_clear();
          }
         else dev_addr++; 
     }
 
+
+
     // Configure oversampling modes, filter coefficient and measurement period 
     bmp2_config conf;
-	conf.os_temp = BMP2_OS_8X;
-	conf.os_pres = BMP2_OS_8X;
+	conf.os_mode = BMP2_OS_MODE_HIGH_RESOLUTION;
 	conf.filter = BMP2_FILTER_COEFF_16;
 	conf.odr = BMP2_ODR_250_MS;
     rslt = bmp2_set_config(&conf, &dev);
 
     // Configure power mode, normal == periodical measurements
     if (rslt==0) rslt = bmp2_set_power_mode(BMP2_POWERMODE_NORMAL, &conf, &dev);
-    if (rslt==0) rslt = bmp2_compute_meas_time(&meas_time, &conf, &dev);
+
 
     if (rslt==0){
+        bmp2_get_power_mode(&tmp, &dev);
         lcd_first_line();
-        lcd_write_string("Sensor mode:");
+        lcd_write_string("Power mode:" + std::to_string(tmp));
+
+        bmp2_get_regs(0xF4, &tmp, 1, &dev);
         lcd_second_line();
-        lcd_write_string("Normal");
-         ThisThread::sleep_for(2s);
-         lcd_clear();
+        lcd_write_string("Ctrl: " + std::to_string(tmp));
+
+        ThisThread::sleep_for(2s);
+        lcd_clear();
     }
     else{
          lcd_first_line();
@@ -111,15 +108,11 @@ int main()
          lcd_second_line();
          lcd_write_string("Error");
          ThisThread::sleep_for(2s);
-          lcd_clear();
+        lcd_clear();
     }
 
     while (true) {
-        rslt = bme280_get_sensor_data(7, &comp_data, &dev);
-        // printf("%d ||| \t%d.%02d Pa | %d.%03d degC |\n", rslt,
-        // int(comp_data.pressure), int(comp_data.pressure*100)%100,
-        // int(comp_data.temperature), int(comp_data.temperature*1000)%1000);
-
+        rslt = bmp2_get_sensor_data(&comp_data, &dev);
         lcd_first_line();
         temp_dec = std::to_string(int(comp_data.temperature*100)%100);
         if (temp_dec.size()==1) temp_dec = "0" + temp_dec;
