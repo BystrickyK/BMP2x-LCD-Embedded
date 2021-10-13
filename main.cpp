@@ -93,7 +93,7 @@ int main()
     if (rslt==0){
         bmp2_get_power_mode(&tmp, &dev);
         lcd_first_line();
-        lcd_write_string("Power mode:" + std::to_string(tmp));
+        lcd_write_string("Power mode: " + std::to_string(tmp));
 
         bmp2_get_regs(0xF4, &tmp, 1, &dev);
         lcd_second_line();
