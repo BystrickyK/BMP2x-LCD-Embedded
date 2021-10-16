@@ -20,9 +20,6 @@
 
 #define BMP2_64BIT_COMPENSATION
 
-
-bmp2_dev dev;  // main BMP2 API object
-
 I2C i2c(D14, D15);
 I2C* i2c_ptr = &i2c;
 
@@ -31,11 +28,11 @@ int8_t user_i2c_read(uint8_t reg_addr, uint8_t *reg_data, uint32_t len, void *in
 int8_t user_i2c_write(uint8_t reg_addr, const uint8_t *reg_data, uint32_t len, void *intf_ptr);
 void user_delay_us(uint32_t period, void *intf_ptr);
 
-int8_t find_I2C_device_address(bmp2_dev* dev, uint8_t dev_addr);
+int8_t find_I2C_device_address(bmp2_dev* dev, uint8_t* dev_addr);
 int8_t configure_sensor_module(bmp2_dev* dev);
 
-int8_t measurement_thread_fun(bmp2_dev* dev, bmp2_data* comp_data);
-int8_t display_thread_fun(bmp2_data* comp_data);
+void measurement_thread_fun(bmp2_dev* dev, bmp2_data* comp_data);
+void display_thread_fun(bmp2_data* comp_data);
 
 uint64_t clock_ms() { return us_ticker_read() / 1000; }
 
@@ -46,6 +43,7 @@ Thread display_thread{osPriorityNormal};
 int main() // MAIN START
 { 
     // Bosch Sensortec BMP2x API object settings
+        bmp2_dev dev;  // main BMP2 API object
         dev.intf = BMP2_I2C_INTF;   // Use I2C
         dev.read = user_i2c_read;   // Define read strategy
         dev.write = user_i2c_write; // Define write strategy
@@ -56,24 +54,33 @@ int main() // MAIN START
         lcd_initialize();     
 
     // Sweep across I2C device address space to find the sensor
-        rslt = find_I2C_device_address(&dev, 0x76);
+        uint8_t device_address = 0x76<<1;
+        rslt = find_I2C_device_address(&dev, &device_address);
 
     // Configure oversampling modes, filter coefficient and measurement period 
         rslt = configure_sensor_module(&dev);
-    
+
+        
     // Start measurement thread
         bmp2_data comp_data;  // Measurement data container
-        auto measurement_lambda = [&](){
+        auto measurement_lambda = [&]() {
             measurement_thread_fun(&dev, &comp_data);
         };
         measurement_thread.start(measurement_lambda);
 
-    // Start display thread
-        auto display_lambda = [&](){
+    // // Start display thread
+        auto display_lambda = [&]() {
             display_thread_fun(&comp_data);
         };
         display_thread.start(display_lambda);
 
+    /*
+    Wait for threads to finish
+    Otherwise, the main thread finishes and deletes its scope, including the 
+    sensor module access object
+    */
+    measurement_thread.join(); 
+    display_thread.join();
 } // MAIN END
 
 
@@ -107,20 +114,20 @@ void user_delay_us(uint32_t period, void *intf_ptr){
 
 /*  */
 
-int8_t find_I2C_device_address(bmp2_dev* dev, uint8_t dev_addr=0x76){
+int8_t find_I2C_device_address(bmp2_dev* dev, uint8_t* dev_addr){
 
     std::string lcd_string;
     uint8_t rslt = 0;
     bool device_found = false;   
 
     while (!device_found){  
-        dev->intf_ptr = &dev_addr;
+        dev->intf_ptr = dev_addr;  // dev_addr gets deleted at end of scope and i2c device address gets lost, fix
         rslt = bmp2_init(dev);
 
         lcd_string = "Result: " + std::to_string(rslt) + "  ";
         lcd_write_string_to_line(lcd_string, 1);
 
-        lcd_string = "I2C Add: " + std::to_string(dev_addr) + "  ";
+        lcd_string = "I2C Add: " + std::to_string(*dev_addr) + "  ";
         lcd_write_string_to_line(lcd_string, 2);
 
         ThisThread::sleep_for(12ms);
@@ -133,7 +140,7 @@ int8_t find_I2C_device_address(bmp2_dev* dev, uint8_t dev_addr=0x76){
             ThisThread::sleep_for(1s);
             lcd_clear();
             }
-        else dev_addr++; 
+        else (*dev_addr)++; 
     } // while(!device_found) end
     return 0; // return 0 on success
 } // function definition end
@@ -160,41 +167,34 @@ int8_t configure_sensor_module(bmp2_dev* dev){
         bmp2_get_regs(0xF4, &tmp, 1, dev);
         lcd_write_string_to_line("Ctrl: " + std::to_string(tmp), 2);
 
-        ThisThread::sleep_for(2s);
+        ThisThread::sleep_for(1s);
         lcd_clear();
     }
     else{
         lcd_write_string_to_line("Power mode:", 1);
         lcd_write_string_to_line("Error", 2);
-        ThisThread::sleep_for(2s);
+        ThisThread::sleep_for(1s);
         lcd_clear();
         return 1;
     }
     return 0;
 } // function definition end
 
-int8_t measurement_thread_fun(bmp2_dev* dev, bmp2_data* comp_data){
+void measurement_thread_fun(bmp2_dev* dev, bmp2_data* comp_data){
 
     uint8_t rslt;
-    auto time_start = clock_ms();
-    auto time_elapsed = clock_ms();
 
     while(true){
         rslt = bmp2_get_sensor_data(comp_data, dev);
         ThisThread::sleep_for(250ms);
-        time_elapsed = clock_ms() - time_start;
-        time_start = clock_ms();
-        printf("\tMeas | %llu\n", time_elapsed);
     }
 } // function definition end
 
-int8_t display_thread_fun(bmp2_data* comp_data){
+void display_thread_fun(bmp2_data* comp_data){
 
     std::string temp_dec, lcd_string;
     auto temperature = comp_data->temperature;
     auto pressure = comp_data->pressure;
-    auto time_start = clock_ms();
-    auto time_elapsed = clock_ms();
 
     while(true){    
         temperature = comp_data->temperature;
@@ -214,8 +214,5 @@ int8_t display_thread_fun(bmp2_data* comp_data){
             lcd_write_string_to_line(lcd_string, 2);
 
         ThisThread::sleep_for(250ms);
-        time_elapsed = clock_ms() - time_start;
-        time_start = clock_ms();
-        printf("Disp | %llu\n", time_elapsed);
     } // while(true) end
 } // function definition end
